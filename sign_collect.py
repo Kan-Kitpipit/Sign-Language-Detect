@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import os
 import mediapipe as mp
+import time
 
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
@@ -44,6 +45,9 @@ def extract_keypoints(results) -> np.ndarray:
 
     return np.concatenate([pose, face, lh, rh]) # 1662 ค่าต่อเฟรม
 
+SAVE_DIR = "MP_Data/_debug"
+os.makedirs(SAVE_DIR, exist_ok=True)
+
 cap = cv2.VideoCapture(0)
 
 with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
@@ -55,11 +59,16 @@ with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=
         draw_landmarks(image, results)
 
         kpts = extract_keypoints(results)
-        cv2.putText(image, f'Keypoints: {kpts.shape[0]}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
 
-        cv2.imshow('Camera', image)
+        cv2.putText(image, 'Press "s" to Save, Press "q" to Quit', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+        cv2.imshow('Save 1 frame', image)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('s'):
+            fname = os.path.join(SAVE_DIR, f"{int(time.time())}.npy")
+            np.save(fname, kpts)
+            print(f"Saved: {fname}")
+        elif key == ord('q'):
             break
 
 cap.release()
