@@ -3,10 +3,18 @@ import numpy as np
 import os
 import mediapipe as mp
 import time
+from pathlib import Path
 
+#--------------- CONFIG ---------------
+DATA_PATH = Path('MP_Data')
+SEQUENCES_LENGTH = 30
+#--------------------------------------
+
+# Mediapipe setup
 mp_holistic = mp.solutions.holistic
 mp_drawing = mp.solutions.drawing_utils
 
+# ฟังก์ชันตรวจจับ Mediapipe
 def mediapipe_detection(image_bgr, model):
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     image_rgb.flags.writeable = False
@@ -15,6 +23,7 @@ def mediapipe_detection(image_bgr, model):
     image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
     return image_bgr, results
 
+# ฟังก์ชันวาด landmarks
 def draw_landmarks(image, results):
     # Face
     mp_drawing.draw_landmarks(image, results.face_landmarks, mp_holistic.FACEMESH_TESSELATION)
@@ -25,6 +34,7 @@ def draw_landmarks(image, results):
     # Right Hand
     mp_drawing.draw_landmarks(image, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
 
+# ฟังก์ชันดึง keypoints
 def extract_keypoints(results) -> np.ndarray:
     pose = np.zeros(33*4, dtype=np.float32)     # 132
     face = np.zeros(468*3, dtype=np.float32)    # 1404
@@ -45,45 +55,75 @@ def extract_keypoints(results) -> np.ndarray:
 
     return np.concatenate([pose, face, lh, rh]) # 1662 ค่าต่อเฟรม
 
-ACTION = "hello"
-SEQ_IDX = 0
-SEQ_LEN = 30
-OUT_DIR = os.path.join("MP_Data", ACTION, str(SEQ_IDX))
-os.makedirs(OUT_DIR, exist_ok=True)
+#---------------------- MAIN ----------------------
+def main():
+    actions = []
+    cap = cv2.VideoCapture(0)
 
-cap = cv2.VideoCapture(0)
-recording = False
-frame_i = 0
+    with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
+        current_action = None
+        recording = False
+        sequence_count = 0
 
-with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
-    while cap.isOpened():
-        ret, frame = cap.read()
-        frame = cv2.flip(frame, 1)
+        while cap.isOpened():
+            ret, frame = cap.read()
+            frame = cv2.flip(frame, 1)
+            if not ret:
+                break
 
-        image, results = mediapipe_detection(frame, holistic)
-        draw_landmarks(image, results)
+            image, results = mediapipe_detection(frame, holistic)
+            draw_landmarks(image, results)
 
-        if recording:
-            kpts = extract_keypoints(results)
-            np.save(os.path.join(OUT_DIR, f"{frame_i}.npy"), kpts)
-            frame_i += 1
-            cv2.putText(image, f"Recording {ACTION}/{SEQ_IDX} {frame_i}/{SEQ_LEN}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA)
-            if frame_i >= SEQ_LEN:
-                recording = False
-                frame_i = 0
-                print(f"Sequence saved to: {OUT_DIR}")
-        else: 
-            cv2.putText(image, "Press 'r' to start recording", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
+            status_text = f"Action: {current_action if current_action else 'None'} | Sequence: {sequence_count} | Recording: {recording}"
+            cv2.putText(image, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if recording else (0, 0, 255), 2)
 
-        cv2.imshow('Record 1 sequence', image)
+            cv2.imshow('Sign Language Data Collector', image)
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('r') and not recording:
-            recording = True
-            frame_i = 0
+            # Key event
+            key = cv2.waitKey(10) & 0xFF
 
-        elif key == ord('q'):
-            break
+            # กด 'n' เพื่อเพิ่ม action ใหม่
+            if key == ord('n'):
+                new_action = input("Enter new action name: ").strip()
+                if new_action:
+                    actions.append(new_action)
+                    current_action = new_action
+                    Path(DATA_PATH / current_action).mkdir(parents=True, exist_ok=True)
+                    print(f"[INFO] Action: {current_action}")
 
-cap.release()
-cv2.destroyAllWindows()
+            # กด 's' เพื่อเริ่มการบันทึก
+            if key == ord('s') and current_action:
+                if not recording:
+                    print(f"[INFO] Start record in 3 seconds...")
+                    time.sleep(3)
+                    print(f"[INFO] Start Recording...")
+                    recording = True
+                    frame_count = 0
+                    existing = list((DATA_PATH / current_action).glob('*'))
+                    sequence_id = len(existing)
+                    seq_path = DATA_PATH / current_action / f"Sequence_{sequence_id}"
+                    seq_path.mkdir(parents=True, exist_ok=True)
+
+                else:
+                    recording = False
+                    print(f"[INFO] Stop Recording...")
+
+            # กด 'q' เพื่อออกจากโปรแกรม
+            if key == ord('q'):
+                break
+
+            if recording and current_action:
+                keypoints = extract_keypoints(results)
+                npy_path = seq_path / f"frame_{frame_count}.npy"
+                np.save(npy_path, keypoints)
+                frame_count += 1
+
+                if frame_count >= SEQUENCES_LENGTH:
+                    print(f"[INFO] Recorded {SEQUENCES_LENGTH} frames for action '{current_action}'.")
+                    recording = False
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
